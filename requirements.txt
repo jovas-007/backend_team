@@ -1,0 +1,10 @@
+Django==4.2.22
+djangorestframework==3.16.1
+django-filter>=24,<26
+django-cors-headers==4.7.0
+pymysql==1.1.1
+python-dateutil==2.9.0.post0
+requests==2.32.3
+cryptography==42.0.8
+google-cloud-storage==2.15.0
+Pillow==10.4.0
