@@ -1,3 +1,4 @@
+# api/views.py
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, parser_classes
@@ -12,6 +13,7 @@ def health(_request):
 def _read_csv_to_df(django_file):
     django_file.seek(0)
     try:
+        # sep=None + engine="python" intenta detectar separador
         df = pd.read_csv(django_file, sep=None, engine="python", low_memory=False)
     except Exception:
         django_file.seek(0)
@@ -25,17 +27,36 @@ def _json_num(v):
     return v
 
 def _build_payload(df: pd.DataFrame) -> dict:
-    # Nulos por columna
+    # ---------- Nulos por columna ----------
     null_counts = df.isna().sum()
-    nulos_labels = list(map(str, null_counts.index))
-    nulos_values = list(map(int, null_counts.values))
+    nulos_labels = [str(c) for c in null_counts.index]
+    nulos_values = [int(v) for v in null_counts.values]
 
-    # Duplicados (filas)
+    # ---------- Duplicados por columna ----------
+    dup_counts = {}
+    dup_percents = {}
+    for col in df.columns:
+        s = df[col].dropna()
+        total = len(s)
+        if total == 0:
+            dup_counts[col] = 0
+            dup_percents[col] = 0.0
+            continue
+        vc = s.value_counts()
+        # Cuenta de celdas que pertenecen a valores repetidos (todas las ocurrencias de valores con freq > 1)
+        dup_count = int(vc[vc > 1].sum())
+        dup_percent = round((dup_count / total) * 100, 2)
+        dup_counts[col] = dup_count
+        dup_percents[col] = dup_percent
+
+    # ---------- Duplicados de FILA (totales) ----------
     dup_rows = int(df.duplicated().sum())
     unique_rows = int(len(df) - dup_rows)
 
-    # Estadísticos numéricos
+    # ---------- Estadísticos numéricos ----------
     num = df.select_dtypes(include="number")
+    cols = [str(c) for c in num.columns]
+
     means   = {c: _json_num(v) for c, v in num.mean(numeric_only=True).items()}
     medians = {c: _json_num(v) for c, v in num.median(numeric_only=True).items()}
     stds    = {c: _json_num(v) for c, v in num.std(numeric_only=True).items()}
@@ -43,7 +64,6 @@ def _build_payload(df: pd.DataFrame) -> dict:
     mins    = {c: _json_num(v) for c, v in num.min(numeric_only=True).items()}
     maxs    = {c: _json_num(v) for c, v in num.max(numeric_only=True).items()}
 
-    cols = list(map(str, num.columns))
     metrics = ["count", "mean", "median", "std", "min", "max"]
     values = [
         [counts.get(c)  for c in cols],
@@ -54,15 +74,25 @@ def _build_payload(df: pd.DataFrame) -> dict:
         [maxs.get(c)    for c in cols],
     ]
     stats_table = {"columns": cols, "metrics": metrics, "values": values}
-
     stats_for_chart = {"labels": cols, "values": [means.get(c) for c in cols]}
+
+    # ---------- Otras (pie de filas únicas vs duplicadas) ----------
     otras = {"labels": ["Únicas", "Duplicadas"], "values": [unique_rows, dup_rows]}
 
+    # ---------- Respuesta completa ----------
     return {
-        "columns": list(map(str, df.columns)),
+        "columns": [str(c) for c in df.columns],
         "rows": int(len(df)),
+
         "nulos": {"labels": nulos_labels, "values": nulos_values},
+
         "dupes": {"unique": unique_rows, "duplicates": dup_rows},
+        "dupes_by_column": {
+            "labels": list(dup_counts.keys()),
+            "counts": list(dup_counts.values()),
+            "percent": list(dup_percents.values())
+        },
+
         "stats": stats_for_chart,
         "statsTable": stats_table,
         "otras": otras
